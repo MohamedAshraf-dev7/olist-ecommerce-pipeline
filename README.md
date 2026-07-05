@@ -140,6 +140,9 @@ pattern in dimensional modeling (order header fact + order line fact).
 | reviews | 58% missing review comments | Expected user behavior, not an error — flagged (`has_comment`), filled with `''` |
 | reviews | 566 orders with more than one review | Flagged (`order_has_multiple_reviews`); latest review kept when merged into `fact_orders` |
 
+## Data Model
+  ![Data Model](data_model.png)
+
 ## Testing
 
 `test_cleaning.py` runs 60 automated checks across every table in both
