@@ -140,6 +140,17 @@ pattern in dimensional modeling (order header fact + order line fact).
 | reviews | 58% missing review comments | Expected user behavior, not an error — flagged (`has_comment`), filled with `''` |
 | reviews | 566 orders with more than one review | Flagged (`order_has_multiple_reviews`); latest review kept when merged into `fact_orders` |
 
+
+## Sample Insights
+
+![Top Categories](analysis/top_categories_by_revenue.png)
+![Monthly Revenue](analysis/monthly_revenue_trend.png)
+![Delivery vs Reviews](analysis/review_score_vs_delivery_time.png)
+
+Delivery speed has a strong relationship with customer satisfaction:
+orders reviewed 1-star took an average of 21 days to deliver, while
+5-star orders took just 10 days — nearly half.
+
 ## Testing
 
 `test_cleaning.py` runs 60 automated checks across every table in both
