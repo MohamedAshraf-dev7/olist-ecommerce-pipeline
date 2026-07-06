@@ -1,20 +1,25 @@
-# Olist E-Commerce Data Cleaning Pipeline
+# Olist E-Commerce Data Pipeline
 
-A Python/pandas data cleaning project built on the Olist Brazilian
+An end-to-end data engineering pipeline built on the Olist Brazilian
 E-Commerce dataset (9 relational CSVs). Implements a **medallion
-architecture** (bronze → silver → gold) ending in a small star schema
-ready for analysis.
+architecture** (bronze → silver → gold), orchestrated with **Airflow**,
+loaded into a **Postgres** warehouse, and visualized in **Metabase**.
 
 ## Architecture
 
 ```
-Bronze (data/)  --clean_*.py-->  Silver (silver/)  --build_gold.py-->  Gold (gold/)
-   raw CSVs                    cleaned, validated                  dim_customers.csv
-                                 1:1 with source                    dim_products.csv
-                                                                     dim_sellers.csv
-                                                                     fact_orders.csv
-                                                                     fact_order_items.csv
+CSV Data → Python (clean) → Airflow (orchestrate) → Postgres (warehouse) → Metabase (dashboard)
 ```
+
+```
+Bronze (bronze/) --clean_*.py--> Silver (silver/) --build_gold.py--> Gold (gold/) --load_to_warehouse.py--> Postgres --> Metabase
+   raw CSVs                    cleaned, validated                 star schema                            queryable        dashboards
+                                 1:1 with source                   (5 tables)                              warehouse
+```
+
+The whole flow above is triggered by a single Airflow DAG
+(`olist_medallion_pipeline`): 9 parallel cleaning tasks → one gold-build
+task → warehouse load → automated tests, all running inside Docker.
 
 - **Bronze** — the 9 raw CSVs, untouched.
 - **Silver** — each raw table cleaned independently: nulls resolved
@@ -24,63 +29,107 @@ Bronze (data/)  --clean_*.py-->  Silver (silver/)  --build_gold.py-->  Gold (gol
   dimension tables (`dim_customers`, `dim_products`, `dim_sellers`) and
   two fact tables at different grains (`fact_orders` — one row per
   order; `fact_order_items` — one row per order line item).
+- **Orchestration** — Apache Airflow (Docker), running the full
+  bronze → silver → gold → warehouse flow as one DAG, on demand.
+- **Warehouse** — Postgres, loaded from the gold-layer CSVs, queryable
+  directly by SQL or a BI tool.
+- **Dashboard** — Metabase, connected to the Postgres warehouse.
 
 ## Project structure
 
+This project spans two folders: the data pipeline itself, and the
+Airflow orchestration layer that runs it.
+
 ```
-olist-cleaning/
-├── data/                  # bronze: raw Olist CSVs
-├── silver/                # cleaned output, one file per source table
-├── gold/                  # dim_customers.csv, dim_products.csv, dim_sellers.csv,
-│                          # fact_orders.csv, fact_order_items.csv
-├── cleaning/              # one script per table, data -> silver
-│   ├── clean_customers.py
+e-commerce/                    # the data pipeline
+├── bronze/                    # raw Olist CSVs (not tracked in git)
+├── silver/                    # cleaned output, one file per source table
+├── gold/                      # dim_customers.csv, dim_products.csv, dim_sellers.csv,
+│                               # fact_orders.csv, fact_order_items.csv
+├── cleaning/                  # one script per table, bronze -> silver
+│   ├── clean_customers_info.py
 │   ├── clean_geolocation.py
-│   ├── clean_sellers.py
+│   ├── clean_sellers_info.py
 │   ├── clean_product_category.py
 │   ├── clean_order_items.py
-│   ├── clean_products.py
-│   ├── clean_orders.py
+│   ├── clean_product_info.py
+│   ├── clean_orders_info.py
 │   ├── clean_order_payments.py
-│   └── clean_reviews.py
-├── build_gold.py          # silver -> gold: dim_customers, fact_orders
-├── build_dim_products.py  # silver -> gold: dim_products
-├── build_dim_sellers.py   # silver -> gold: dim_sellers
-├── build_fact_order_items.py  # silver -> gold: fact_order_items
-└── test_cleaning.py        # validation checks across silver + gold
+│   └── clean_order_reviews.py
+├── analysis/                  # charts produced by analyze_gold.py
+├── build_gold.py              # silver -> gold: all 5 star schema tables
+├── load_to_warehouse.py       # gold CSVs -> Postgres warehouse
+├── analyze_gold.py            # sample analysis / charts against the gold layer
+├── test_cleaning.py           # validation checks across silver + gold
+├── requirements.txt
+└── README.md
+
+airflow-olist/                 # the orchestration layer
+├── docker-compose.yaml        # airflow + postgres (warehouse) + metabase
+├── dags/
+│   └── olist_pipeline.py      # the DAG: silver tasks -> build_gold -> load -> tests
+├── logs/
+├── plugins/
+├── config/
+└── .env
 ```
+
+`airflow-olist` mounts `e-commerce` as a volume, so the DAG can call
+the pipeline's actual scripts directly — no code duplication between
+the two folders.
 
 ## How to run
 
+### Option A — via Airflow (recommended, fully orchestrated)
+
 ```bash
+cd airflow-olist
+docker compose up -d
+```
+
+Wait for all 3 containers (`airflow`, `warehouse`, `metabase`) to report
+`Up`, then open `http://localhost:8080`, log in, and trigger the
+`olist_medallion_pipeline` DAG. This runs the entire flow — all 9
+silver cleaning tasks, the gold build, the warehouse load, and the
+test suite — end to end.
+
+### Option B — manually, step by step
+
+```bash
+cd e-commerce
+
 # 1. Activate the virtual environment
 venv\Scripts\Activate.ps1        # Windows PowerShell
 source venv/bin/activate         # Mac/Linux
 
 # 2. Run each cleaning script (bronze -> silver)
-python cleaning/clean_customers.py
+python cleaning/clean_customers_info.py
 python cleaning/clean_geolocation.py
-python cleaning/clean_sellers.py
+python cleaning/clean_sellers_info.py
 python cleaning/clean_product_category.py
 python cleaning/clean_order_items.py
-python cleaning/clean_products.py
-python cleaning/clean_orders.py
+python cleaning/clean_product_info.py
+python cleaning/clean_orders_info.py
 python cleaning/clean_order_payments.py
-python cleaning/clean_reviews.py
+python cleaning/clean_order_reviews.py
 
 # 3. Build the gold layer (silver -> gold)
 python build_gold.py
-python build_dim_products.py
-python build_dim_sellers.py
-python build_fact_order_items.py
 
-# 4. Validate everything
+# 4. Load into the Postgres warehouse
+python load_to_warehouse.py
+
+# 5. Validate everything
 python test_cleaning.py
+
+# 6. (optional) Generate sample analysis charts
+python analyze_gold.py
 ```
 
-All scripts assume they're run from the project root, since file paths
-inside them (`data/...`, `silver/...`, `gold/...`) are relative to the
-current working directory, not the script's own location.
+All scripts assume they're run from the `e-commerce` project root,
+since file paths inside them (`bronze/...`, `silver/...`, `gold/...`)
+are relative to the current working directory, not the script's own
+location.
 
 ## Gold schema
 
@@ -114,6 +163,38 @@ Two fact tables at two different grains, rather than forcing one table
 to serve both order-level and item-level questions -- a standard
 pattern in dimensional modeling (order header fact + order line fact).
 
+## Orchestration
+
+The entire pipeline runs as a single Airflow DAG, `olist_medallion_pipeline`:
+
+```
+clean_customers ─┐
+clean_geolocation├─┐
+clean_sellers    │ │
+clean_*  (9 total)├─▶ build_gold ─▶ load_to_warehouse ─▶ run_tests
+                  │ │
+                 ─┘─┘
+```
+
+All 9 silver-layer cleaning tasks are independent of each other and
+run in parallel. `build_gold` waits for all of them, builds all 5 star
+schema tables, then `load_to_warehouse` pushes those tables into
+Postgres, and `run_tests` validates the whole thing.
+
+Runs inside Docker via `docker-compose.yaml` in `airflow-olist/`, which
+also defines the `warehouse` (Postgres) and `metabase` services. The
+Airflow container mounts the `e-commerce` project folder as a volume,
+so the DAG calls the pipeline's real scripts directly rather than
+duplicating any logic.
+
+## Warehouse & dashboard
+
+`load_to_warehouse.py` loads all 5 gold tables into a Postgres
+database (`olist_gold`), making them queryable with plain SQL instead
+of only via pandas/CSV. Metabase connects to this same database for
+dashboarding — no separate ETL needed for the BI layer, since it reads
+directly from the tables Airflow keeps up to date.
+
 ## Key data issues found and how they were handled
 
 | Table | Issue | Decision |
@@ -140,23 +221,13 @@ pattern in dimensional modeling (order header fact + order line fact).
 | reviews | 58% missing review comments | Expected user behavior, not an error — flagged (`has_comment`), filled with `''` |
 | reviews | 566 orders with more than one review | Flagged (`order_has_multiple_reviews`); latest review kept when merged into `fact_orders` |
 
-
-## Sample Insights
-
-![Top Categories](analysis/top_categories_by_revenue.png)
-![Monthly Revenue](analysis/monthly_revenue_trend.png)
-![Delivery vs Reviews](analysis/review_score_vs_delivery_time.png)
-
-Delivery speed has a strong relationship with customer satisfaction:
-orders reviewed 1-star took an average of 21 days to deliver, while
-5-star orders took just 10 days — nearly half.
-
 ## Testing
 
 `test_cleaning.py` runs 60 automated checks across every table in both
 the silver and gold layers — nulls, duplicate keys, valid ranges,
 foreign key integrity, and confirmation that no merge step silently
-duplicated or dropped rows. Run it after any change to the pipeline.
+duplicated or dropped rows. Runs automatically as the last step of the
+Airflow DAG, or manually anytime after a change to the pipeline.
 
 ## Dataset
 
