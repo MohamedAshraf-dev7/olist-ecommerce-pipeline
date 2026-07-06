@@ -1,0 +1,35 @@
+services:
+  airflow:
+    image: apache/airflow:2.9.1-python3.11
+    environment:
+      - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+      - AIRFLOW__API_AUTH__JWT_SECRET=a24cb968b3888f05ea6d381d6a2c6366e76deab0d835df2d6595aa908e23cf37
+      - _PIP_ADDITIONAL_REQUIREMENTS=pandas numpy matplotlib sqlalchemy psycopg2-binary
+    volumes:
+      - ./:/opt/airflow
+      - ../:/opt/olist_project
+    ports:
+      - "8080:8080"
+    command: airflow standalone
+
+  warehouse:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: analytics
+      POSTGRES_PASSWORD: analytics
+      POSTGRES_DB: olist_gold
+    ports:
+      - "5432:5432"
+    volumes:
+      - warehouse-db-volume:/var/lib/postgresql/data
+    restart: always
+    
+  metabase:
+    image: metabase/metabase:latest
+    ports:
+      - "3000:3000"
+    depends_on:
+      - warehouse
+
+volumes:
+  warehouse-db-volume:

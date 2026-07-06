@@ -1,15 +1,8 @@
-# Virtual environment
 venv/
-
-# Python cache
 __pycache__/
 *.pyc
-
-# Data (regeneratable from scripts, and CSVs can be large)
 bronze/*.csv
 silver/*.csv
 gold/*.csv
-
-# OS junk
 .DS_Store
 Thumbs.db
